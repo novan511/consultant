@@ -115,15 +115,21 @@ body { background: var(--bg-0); overflow: auto; }
 
     async function startDiscussion() {
       const btn = $('#discussBtn');
-      btn.disabled = true; btn.textContent = 'Discussion in progress…';
-      const thread = $('#discussionThread');
-      thread.innerHTML = '<div class="disc-spinner">Professors are discussing… (3 rounds × multiple professors)</div>';
+      btn.disabled = true; btn.textContent = 'Starting…';
       try {
-        const r = await fetch(`/api/projects/${proj.id}/discuss`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
-        const j = await r.json();
-        if (j.ok) { await load(); }
-        else { thread.innerHTML = `<div style="color:var(--bad);font-size:12px;">${esc(j.error||'Failed')}</div>`; btn.disabled = false; btn.textContent = '💬 Trigger Discussion'; }
-      } catch(e) { thread.innerHTML = '<div style="color:var(--bad);font-size:12px;">Network error</div>'; btn.disabled = false; btn.textContent = '💬 Trigger Discussion'; }
+        await fetch(`/api/projects/${proj.id}/discuss`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+        // Poll every 5s for completion
+        btn.textContent = 'Discussion in progress…';
+        const poll = setInterval(async () => {
+          const fresh = await fetch(`/api/projects/${proj.id}`).then(r=>r.json());
+          const hasSummary = (fresh.phases||[]).some(ph => ph.phase === 'discussion' && ph.metadata?.is_summary);
+          const running = fresh.metadata?.discussion_running;
+          if (hasSummary || !running) {
+            clearInterval(poll);
+            await load();
+          }
+        }, 5000);
+      } catch(e) { btn.disabled = false; btn.textContent = '💬 Trigger Discussion'; }
     }
 
     async function load() {
