@@ -261,6 +261,87 @@ app.get('/api/projects/:id', async (req, res) => {
   res.json({ ...proj.data, phases: phases.data || [], comments: comments.data || [] });
 });
 
+// Trigger inter-professor discussion within a project
+app.post('/api/projects/:id/discuss', async (req, res) => {
+  if (!senate) return res.status(503).json({ error: 'Senate not ready' });
+  const { id } = req.params;
+  const { topic } = req.body || {};
+  const { data: proj } = await supabase.from('projects').select('*').eq('id', id).single();
+  if (!proj) return res.status(404).json({ error: 'not found' });
+
+  // Get assigned professors
+  let profIds = proj.assigned_professors || [];
+  if (profIds.length < 2) {
+    const tokens = `${proj.title} ${proj.description}`.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length > 3);
+    const scored = senate.roster.map(r => {
+      const fields = [...(r.expertise||[]), ...(r.subfields||[])].join(' ').toLowerCase();
+      let s = 0; for (const t of tokens) if (fields.includes(t)) s++;
+      return { r, s };
+    }).sort((a, b) => b.s - a.s);
+    profIds = scored.slice(0, 3).map(x => x.r.id);
+    await supabase.from('projects').update({ assigned_professors: profIds }).eq('id', id);
+  }
+
+  const profs = profIds.map(pid => senate.professors.get(pid)).filter(Boolean);
+  if (profs.length < 2) return res.status(400).json({ error: 'need at least 2 professors' });
+
+  const discussTopic = topic || `Given the project "${proj.title}" (${proj.description}), what is the most promising approach and what are the biggest risks?`;
+  const { data: prevPhases } = await supabase.from('project_phases').select('professor_name,phase,content').eq('project_id', id).order('created_at', { ascending: false }).limit(3);
+  const historyText = (prevPhases || []).map(p => `[${p.professor_name} → ${p.phase}]: ${(p.content||'').slice(0, 300)}`).join('\n');
+
+  const turns = [];
+
+  // Round 1: First professor opens
+  let prevArgument = `${discussTopic}\n\nRecent project work:\n${historyText}`;
+  for (let round = 0; round < 3; round++) {
+    for (const prof of profs) {
+      const opponent = profs.find(p => p.id !== prof.id);
+      const { content } = await prof.ask(
+        `PROJECT DISCUSSION — Round ${round + 1}.\nTopic: ${discussTopic}\nProject: "${proj.title}"\n${opponent ? `Your colleague ${opponent.record.name} previously said:\n"${prevArgument.slice(0, 500)}"` : ''}\n\nRespond with your position (2-3 paragraphs). Agree, disagree, or build on what was said. Be specific and cite your expertise.`,
+        { temperature: 0.8, max_tokens: 600 }
+      );
+
+      const turn = {
+        professor_id: prof.id,
+        professor_name: prof.record.name,
+        expertise: prof.record.expertise[0],
+        avatar_color: prof.record.avatar_color,
+        round: round + 1,
+        content: content.trim(),
+        ts: new Date().toISOString()
+      };
+      turns.push(turn);
+
+      await supabase.from('project_phases').insert({
+        project_id: id,
+        phase: 'discussion',
+        professor_id: prof.id,
+        professor_name: prof.record.name,
+        action: `round ${round + 1} discussion`,
+        content: content.trim(),
+        metadata: { discussion_round: round + 1, topic: discussTopic }
+      });
+
+      prevArgument = content;
+    }
+  }
+
+  // Summary from a third professor or the first one
+  const summarizer = profs.length > 2 ? profs[2] : profs[0];
+  const summaryInput = turns.map(t => `${t.professor_name} (R${t.round}): ${t.content.slice(0, 200)}`).join('\n');
+  const { content: summary } = await summarizer.ask(
+    `Summarize this discussion about "${proj.title}". Points of agreement, disagreements, and key insights:\n${summaryInput}`,
+    { temperature: 0.6, max_tokens: 400 }
+  );
+
+  await supabase.from('project_phases').insert({
+    project_id: id, phase: 'discussion', professor_id: summarizer.id, professor_name: summarizer.record.name,
+    action: 'discussion summary', content: summary, metadata: { is_summary: true }
+  });
+
+  res.json({ ok: true, turns, summary });
+});
+
 app.post('/api/projects/:id/comment', async (req, res) => {
   const { author, content } = req.body || {};
   if (!content) return res.status(400).json({ error: 'content required' });

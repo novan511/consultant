@@ -43,6 +43,26 @@ body { background: var(--bg-0); overflow: auto; }
 .comment-form { display: flex; gap: 8px; margin-top: 10px; }
 .comment-form input { flex: 1; }
 .comment-form button { background: var(--accent-2); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.discussion-section { margin-bottom: 24px; }
+.discussion-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 10px; }
+.disc-turn { display: flex; gap: 10px; margin-bottom: 12px; animation: entrySlide .35s var(--spring-snap) both; }
+.disc-turn:nth-child(1) { animation-delay: 0ms; }
+.disc-turn:nth-child(2) { animation-delay: 60ms; }
+.disc-turn:nth-child(3) { animation-delay: 120ms; }
+.disc-turn:nth-child(4) { animation-delay: 180ms; }
+.disc-turn:nth-child(5) { animation-delay: 240ms; }
+.disc-turn:nth-child(6) { animation-delay: 300ms; }
+.disc-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 13px; font-weight: 700; color: rgba(255,255,255,.9); }
+.disc-bubble { flex: 1; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.disc-bubble .disc-header { font-size: 11px; margin-bottom: 4px; }
+.disc-bubble .disc-name { font-weight: 600; color: var(--accent); }
+.disc-bubble .disc-expertise { color: var(--muted); }
+.disc-bubble .disc-round { font-size: 9px; padding: 1px 5px; border-radius: 999px; background: var(--bg-3); color: var(--muted); margin-left: 4px; }
+.disc-bubble .disc-body { font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.disc-bubble .disc-time { font-size: 9px; color: var(--muted); margin-top: 4px; }
+.disc-summary { background: rgba(124,58,237,.08); border: 1px solid rgba(124,58,237,.2); border-radius: 10px; padding: 12px; margin-top: 8px; }
+.disc-summary h4 { font-size: 11px; color: var(--accent); margin-bottom: 6px; }
+.disc-spinner { text-align: center; padding: 20px; color: var(--muted); font-size: 12px; }
 .status-current { text-align: center; padding: 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 20px; }
 .status-current .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
 .status-current .value { font-size: 16px; font-weight: 700; color: var(--accent); margin-top: 4px; }
@@ -68,6 +88,43 @@ body { background: var(--bg-0); overflow: auto; }
     const PHASES = ['ideation','hypothesis','research','debate','experimentation','refinement','results','published'];
     const phaseColors = { ideation:'#a855f7',hypothesis:'#60a5fa',research:'#22d3ee',debate:'#fbbf24',experimentation:'#34d399',refinement:'#f472b6',results:'#f87171',published:'#4ade80' };
     let proj = null;
+
+    function renderDiscussion(phases) {
+      const summary = phases.find(ph => ph.metadata?.is_summary);
+      const turns = phases.filter(ph => !ph.metadata?.is_summary);
+      let html = turns.map(ph => {
+        const initials = (ph.professor_name||'').replace(/^Dr\.\s*/i,'').split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
+        return `<div class="disc-turn">
+          <div class="disc-avatar" style="background:radial-gradient(circle at 38% 35%, ${phaseColors[ph.phase]||'#7c3aed'}, #0a0e14 75%)">${initials}</div>
+          <div class="disc-bubble">
+            <div class="disc-header">
+              <span class="disc-name">${esc(ph.professor_name)}</span>
+              <span class="disc-expertise"> · R${ph.metadata?.discussion_round||'?'}</span>
+              <span class="disc-round">${esc(ph.phase)}</span>
+            </div>
+            <div class="disc-body">${esc(ph.content)}</div>
+            <div class="disc-time">${time(ph.created_at)}</div>
+          </div>
+        </div>`;
+      }).join('');
+      if (summary) {
+        html += `<div class="disc-summary"><h4>📋 Discussion Summary</h4><div style="font-size:12px;line-height:1.6;white-space:pre-wrap;">${esc(summary.content)}</div></div>`;
+      }
+      return html;
+    }
+
+    async function startDiscussion() {
+      const btn = $('#discussBtn');
+      btn.disabled = true; btn.textContent = 'Discussion in progress…';
+      const thread = $('#discussionThread');
+      thread.innerHTML = '<div class="disc-spinner">Professors are discussing… (3 rounds × multiple professors)</div>';
+      try {
+        const r = await fetch(`/api/projects/${proj.id}/discuss`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) });
+        const j = await r.json();
+        if (j.ok) { await load(); }
+        else { thread.innerHTML = `<div style="color:var(--bad);font-size:12px;">${esc(j.error||'Failed')}</div>`; btn.disabled = false; btn.textContent = '💬 Trigger Discussion'; }
+      } catch(e) { thread.innerHTML = '<div style="color:var(--bad);font-size:12px;">Network error</div>'; btn.disabled = false; btn.textContent = '💬 Trigger Discussion'; }
+    }
 
     async function load() {
       const id = location.pathname.split('/').pop();
@@ -102,7 +159,17 @@ body { background: var(--bg-0); overflow: auto; }
         </div>
         <div class="actions">
           <button class="advance-btn" id="advanceBtn" onclick="advancePhase()" ${p.status==='published'?'disabled':''}>▶ Advance to Next Phase</button>
+          <button class="advance-btn" id="discussBtn" onclick="startDiscussion()" style="background:var(--warn);">💬 Trigger Discussion</button>
           <span style="font-size:11px;color:var(--muted);align-self:center;">${(p.assigned_professors||[]).length} professor(s) assigned</span>
+        </div>
+        <div class="discussion-section">
+          <h3>Professor Discussion</h3>
+          <div id="discussionThread">
+            ${(p.phases||[]).filter(ph => ph.phase === 'discussion').length === 0
+              ? '<div style="color:var(--muted);font-size:12px;margin-bottom:10px;">No discussions yet. Click "Trigger Discussion" to start a debate between professors.</div>'
+              : renderDiscussion(p.phases.filter(ph => ph.phase === 'discussion'))
+            }
+          </div>
         </div>
         <div class="timeline">
           <h3>Research Timeline (${(p.phases||[]).length} entries)</h3>
