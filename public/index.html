@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Professor Senate — 50-Agent Research Hall</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⚛</span>
+      <span class="title">Professor Senate</span>
+      <span class="sub">50 minds · 12 LLMs · 24/7</span>
+    </div>
+    <div class="controls">
+      <input id="search" placeholder="Search professors, topics, journals…" />
+      <select id="filterUni">
+        <option value="">All universities</option>
+        <option>MIT</option><option>Harvard</option><option>Oxford</option>
+      </select>
+      <button id="debateBtn" title="Trigger a random debate">Debate</button>
+      <button id="tickAllBtn" title="Run one tick on all">Tick All</button>
+    </div>
+  </header>
+
+  <!-- Full-screen board -->
+  <section class="board" id="board">
+    <svg class="connections" id="connections"></svg>
+    <div class="grid-bg"></div>
+    <!-- Category legend -->
+    <div class="cat-legend" id="catLegend"></div>
+  </section>
+
+  <!-- Floating sidebar panel (draggable) -->
+  <div class="float-panel sidebar-panel" id="sidebarPanel">
+    <div class="float-header" id="sidebarDragHandle">
+      <span class="float-title">Professor Detail</span>
+      <button class="float-close" id="closeSidebar">✕</button>
+    </div>
+    <div class="float-body" id="detailPanel">
+      <div class="empty">Select a professor to inspect.</div>
+    </div>
+  </div>
+
+  <!-- Floating chat panel (draggable) -->
+  <div class="float-panel chat-panel" id="chatPanel">
+    <div class="float-header" id="chatDragHandle">
+      <span class="float-title">Senate Chat</span>
+      <button class="float-close" id="closeChat">✕</button>
+    </div>
+    <div class="chatlog" id="chatlog"></div>
+    <form id="askForm" class="askbar">
+      <textarea id="askInput" placeholder="Ask the Senate…"></textarea>
+      <button type="submit">Send</button>
+    </form>
+  </div>
+
+  <!-- Floating toggle buttons (draggable) -->
+  <button class="fab fab-sidebar" id="toggleSidebar" title="Open detail panel">📋</button>
+  <button class="fab fab-chat" id="toggleChat" title="Open chat">💬</button>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/supabase.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
