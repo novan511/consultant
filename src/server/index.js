@@ -353,16 +353,55 @@ app.post('/api/projects/:id/advance', async (req, res) => {
 // Start auto-advance loop for projects (every 5 min, advance 1 project if idle)
 async function projectLoop() {
   if (!senate || !senate.running) { setTimeout(projectLoop, 30000); return; }
+
   try {
-    const { data: projects } = await supabase.from('projects').select('*').not('status', 'eq', 'published').order('updated_at', { ascending: true }).limit(1);
-    if (projects?.length) {
-      const proj = projects[0];
-      console.log(`[project] Auto-advancing: ${proj.title} → next phase`);
-      // Simulate the advance internally
-      const currentIdx = PHASE_ORDER.indexOf(proj.status);
-      const nextPhase = PHASE_ORDER[Math.min(currentIdx + 1, PHASE_ORDER.length - 1)];
-      if (nextPhase !== proj.status) {
-        // Pick a random assigned prof or auto-assign
+    // === PART 1: Autonomous project creation from feed ===
+    const { count } = await supabase.from('projects').select('*', { count: 'exact', head: true });
+    if (!count || count < 8) {
+      try {
+        const { getFeed } = await import('./feed.js');
+        const feed = await getFeed();
+        if (feed.length) {
+          // Pick a random professor and have them propose a project
+          const proposer = senate.roster[Math.floor(Math.random() * senate.roster.length)];
+          const prof = senate.professors.get(proposer.id);
+          const recentFeed = feed.slice(0, 10).map(f => `- ${f.title}: ${(f.summary||'').slice(0, 200)}`).join('\n');
+          const { content } = await prof.ask(
+            `You are a ${proposer.expertise.join('/')} researcher. Based on these recent developments:\n${recentFeed}\n\nPropose ONE novel research project that could lead to a groundbreaking invention for humanity. Reply in this EXACT JSON format (no markdown):\n{"title":"...","description":"...","vision":"..."}`,
+            { temperature: 0.9, max_tokens: 500 }
+          );
+          let parsed;
+          try { parsed = JSON.parse(content.match(/\{[\s\S]*\}/)?.[0] || content); } catch { parsed = null; }
+          if (parsed?.title) {
+            const { data: existing } = await supabase.from('projects').select('id').eq('title', parsed.title).limit(1);
+            if (!existing?.length) {
+              await supabase.from('projects').insert({
+                title: parsed.title, description: parsed.description || '', vision: parsed.vision || '',
+                status: 'ideation', assigned_professors: [proposer.id],
+                phase_summary: `Proposed by ${proposer.name}. Auto-created from ${feed[0]?.source || 'feed'}.`
+              });
+              console.log(`[project] Auto-created: "${parsed.title}" by ${proposer.name}`);
+            }
+          }
+        }
+      } catch (e) { console.error('[project] Creation error:', e.message); }
+    }
+
+    // === PART 2: Auto-advance existing projects ===
+    const { data: activeProjects } = await supabase.from('projects').select('*').not('status', 'eq', 'published').order('updated_at', { ascending: true }).limit(3);
+    for (const proj of (activeProjects || [])) {
+      try {
+        const currentIdx = PHASE_ORDER.indexOf(proj.status);
+        const nextPhase = PHASE_ORDER[Math.min(currentIdx + 1, PHASE_ORDER.length - 1)];
+        if (nextPhase === proj.status) continue;
+
+        // Get existing phases + comments for context
+        const { data: prevPhases } = await supabase.from('project_phases').select('professor_name,phase,content').eq('project_id', proj.id).order('created_at', { ascending: false }).limit(4);
+        const { data: comments } = await supabase.from('project_comments').select('author,content').eq('project_id', proj.id);
+        const historyText = (prevPhases || []).map(p => `[${p.professor_name} → ${p.phase}]: ${(p.content||'').slice(0, 400)}`).join('\n');
+        const commentsText = (comments || []).map(c => `[${c.author}]: ${c.content}`).join('\n');
+
+        // Assign professors
         let profIds = proj.assigned_professors || [];
         if (profIds.length === 0) {
           const tokens = `${proj.title} ${proj.description}`.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length > 3);
@@ -371,20 +410,137 @@ async function projectLoop() {
             let s = 0; for (const t of tokens) if (fields.includes(t)) s++;
             return { r, s };
           }).sort((a, b) => b.s - a.s);
-          profIds = scored.slice(0, 2).map(x => x.r.id);
+          profIds = scored.slice(0, 3).map(x => x.r.id);
           await supabase.from('projects').update({ assigned_professors: profIds }).eq('id', proj.id);
         }
-        const prof = senate.professors.get(profIds[0]);
-        if (prof) {
-          const { content } = await prof.ask(`You are contributing to the ${nextPhase} phase of project "${proj.title}". Vision: ${proj.vision}. Description: ${proj.description}. Produce a concise contribution.`, { temperature: 0.8, max_tokens: 800 });
-          await supabase.from('project_phases').insert({ project_id: proj.id, phase: nextPhase, professor_id: prof.id, professor_name: prof.record.name, action: `auto-advance to ${nextPhase}`, content, metadata: { auto: true } });
-          await supabase.from('projects').update({ status: nextPhase, active_professor: prof.id, updated_at: new Date().toISOString(), phase_summary: `Auto-advanced to ${nextPhase} by ${prof.record.name}` }).eq('id', proj.id);
+
+        const prompts = {
+          ideation: `PROJECT IDEATION. "${proj.title}" — Vision: ${proj.vision}. Description: ${proj.description}. User feedback: ${commentsText || 'None'}. Brainstorm the novel invention, 3 scientific barriers.`,
+          hypothesis: `HYPOTHESIS PHASE. "${proj.title}". History: ${historyText}. User feedback: ${commentsText}. Formulate 2-3 testable hypotheses with evidence needed and falsification criteria.`,
+          research: `RESEARCH PHASE. "${proj.title}". History: ${historyText}. User feedback: ${commentsText}. Literature review: prior art, critical references, the exact gap this fills.`,
+          debate: `DEBATE PHASE. "${proj.title}". History: ${historyText}. User feedback: ${commentsText}. Argue FOR and AGAINST feasibility. Strongest arguments each side. What must be true for this to work.`,
+          experimentation: `EXPERIMENTATION PHASE. "${proj.title}". History: ${historyText}. User feedback: ${commentsText}. Design experiments/computational studies. Materials, methods, expected results, controls.`,
+          refinement: `REFINEMENT PHASE. "${proj.title}". History: ${historyText}. User feedback: ${commentsText}. What needs refinement? Wrong assumptions? Revisions needed?`,
+          results: `RESULTS PHASE. "${proj.title}". History: ${historyText}. User feedback: ${commentsText}. Synthesize all findings. Status of each hypothesis. What remains uncertain?`,
+          published: `FINAL PUBLICATION. "${proj.title}". History: ${historyText}. User feedback: ${commentsText}. Write a comprehensive 500-word research summary: novel discovery, impact for humanity, limitations, future research directions.`
+        };
+
+        // Multiple professors contribute
+        const contribs = profIds.slice(0, nextPhase === 'published' ? 3 : 2);
+        for (const pid of contribs) {
+          const prof = senate.professors.get(pid);
+          if (!prof) continue;
+          await supabase.from('projects').update({ active_professor: pid }).eq('id', proj.id);
+          const { content } = await prof.ask(prompts[nextPhase] || `Continue "${proj.title}" in ${nextPhase} phase.`, { temperature: 0.8, max_tokens: 1000 });
+          await supabase.from('project_phases').insert({
+            project_id: proj.id, phase: nextPhase, professor_id: prof.id, professor_name: prof.record.name,
+            action: `auto-advance to ${nextPhase}`, content, metadata: { auto: true }
+          });
         }
-      }
+
+        await supabase.from('projects').update({
+          status: nextPhase, updated_at: new Date().toISOString(),
+          phase_summary: `${nextPhase.toUpperCase()}: ${contribs.length} professor(s) contributed. ${currentIdx + 2}/${PHASE_ORDER.length} phases.`
+        }).eq('id', proj.id);
+        console.log(`[project] "${proj.title}" → ${nextPhase}`);
+
+        // === PART 3: Generate PDF when published ===
+        if (nextPhase === 'published') {
+          await generateProjectPDF(proj.id);
+        }
+      } catch (e) { console.error('[project] Advance error:', e.message); }
     }
   } catch (e) { console.error('[project] Loop error:', e.message); }
-  setTimeout(projectLoop, 300000); // every 5 min
+  setTimeout(projectLoop, 180000); // every 3 min
 }
+
+async function generateProjectPDF(projectId) {
+  try {
+    const PDFDocument = (await import('pdfkit')).default;
+    const { data: proj } = await supabase.from('projects').select('*').eq('id', projectId).single();
+    if (!proj) return;
+    const { data: phases } = await supabase.from('project_phases').select('*').eq('project_id', projectId).order('created_at', { ascending: true });
+    const { data: comments } = await supabase.from('project_comments').select('*').eq('project_id', projectId);
+
+    const chunks = [];
+    const doc = new PDFDocument({ margin: 50 });
+    doc.on('data', c => chunks.push(c));
+
+    // Title page
+    doc.fontSize(24).font('Helvetica-Bold').text('RESEARCH REPORT', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(18).font('Helvetica-Bold').text(proj.title, { align: 'center' });
+    doc.moveDown(0.3);
+    doc.fontSize(11).font('Helvetica').fillColor('#666').text(`Professor Senate — Autonomous Research Division`, { align: 'center' });
+    doc.moveDown(0.2);
+    doc.text(`Status: ${proj.status.toUpperCase()} | Phases: ${phases?.length || 0} | Generated: ${new Date().toISOString().slice(0, 10)}`, { align: 'center' });
+    doc.moveDown(1);
+    doc.fillColor('#000');
+
+    // Vision
+    doc.fontSize(13).font('Helvetica-Bold').text('Vision');
+    doc.moveDown(0.2);
+    doc.fontSize(11).font('Helvetica').text(proj.vision || 'N/A');
+    doc.moveDown(0.5);
+
+    // Description
+    doc.fontSize(13).font('Helvetica-Bold').text('Description');
+    doc.moveDown(0.2);
+    doc.fontSize(11).font('Helvetica').text(proj.description || 'N/A');
+    doc.moveDown(1);
+
+    // Timeline of phases
+    doc.fontSize(13).font('Helvetica-Bold').text('Research Timeline');
+    doc.moveDown(0.3);
+    for (const ph of (phases || [])) {
+      if (doc.y > 700) doc.addPage();
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#666').text(`[${ph.phase.toUpperCase()}] ${ph.professor_name} — ${new Date(ph.created_at).toLocaleDateString()}`);
+      doc.moveDown(0.1);
+      doc.fontSize(10).font('Helvetica').fillColor('#000').text(ph.content || 'No content');
+      doc.moveDown(0.5);
+    }
+
+    // User comments
+    if (comments?.length) {
+      if (doc.y > 600) doc.addPage();
+      doc.fontSize(13).font('Helvetica-Bold').text('User Comments & Feedback');
+      doc.moveDown(0.3);
+      for (const c of comments) {
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#066').text(`${c.author}:`);
+        doc.fontSize(10).font('Helvetica').fillColor('#000').text(c.content);
+        doc.moveDown(0.3);
+      }
+    }
+
+    doc.end();
+    return new Promise(resolve => {
+      doc.on('end', async () => {
+        const buffer = Buffer.concat(chunks);
+        const path = `research-${projectId}.pdf`;
+        const { error } = await supabase.storage.from('research-pdfs').upload(path, buffer, { contentType: 'application/pdf', upsert: true });
+        if (error) console.log('[pdf] Storage upload note:', error.message);
+        // Also save URL in project
+        const url = `${process.env.SUPABASE_URL}/storage/v1/object/public/research-pdfs/${path}`;
+        await supabase.from('projects').update({ metadata: { pdf_url: url } }).eq('id', projectId);
+        console.log(`[pdf] Generated: ${proj.title}`);
+        resolve();
+      });
+    });
+  } catch (e) { console.error('[pdf] Error:', e.message); }
+}
+
+// Add download endpoint
+app.get('/api/projects/:id/pdf', async (req, res) => {
+  const { data: proj } = await supabase.from('projects').select('*').eq('id', req.params.id).single();
+  if (!proj?.metadata?.pdf_url) {
+    // Generate on-the-fly
+    await generateProjectPDF(req.params.id);
+    const { data: p2 } = await supabase.from('projects').select('*').eq('id', req.params.id).single();
+    if (p2?.metadata?.pdf_url) return res.redirect(p2.metadata.pdf_url);
+    return res.status(404).json({ error: 'PDF not ready yet' });
+  }
+  res.redirect(proj.metadata.pdf_url);
+});
 
 async function main() {
   console.log('Verifying Supabase...');

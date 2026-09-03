@@ -19,6 +19,7 @@
     "node-fetch": "^3.3.2",
     "node-telegram-bot-api": "^2.1.0",
     "openai": "^4.62.0",
+    "pdfkit": "^0.20.2",
     "pg": "^8.13.1"
   }
 }
