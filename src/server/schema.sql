@@ -95,7 +95,50 @@ CREATE TABLE IF NOT EXISTS user_messages (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Atomic counter bumps so we don't have to read-modify-write.
+-- ============================================================
+-- RESEARCH PROJECTS — collaborative invention pipeline
+-- ============================================================
+CREATE TABLE IF NOT EXISTS projects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  description TEXT,
+  vision TEXT,
+  status TEXT DEFAULT 'ideation',
+  phase_summary TEXT,
+  assigned_professors TEXT[],
+  active_professor TEXT,
+  created_by TEXT DEFAULT 'user',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+
+CREATE TABLE IF NOT EXISTS project_phases (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  phase TEXT NOT NULL,
+  professor_id TEXT,
+  professor_name TEXT,
+  action TEXT NOT NULL,
+  content TEXT,
+  arguments_for TEXT[],
+  arguments_against TEXT[],
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pp_phases_project ON project_phases(project_id);
+
+CREATE TABLE IF NOT EXISTS project_comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  author TEXT DEFAULT 'user',
+  content TEXT NOT NULL,
+  read_by_professors BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pc_comments_project ON project_comments(project_id);
+
+-- Atomic counter bumps
 CREATE OR REPLACE FUNCTION bump_professor_interactions(p_id TEXT) RETURNS void AS $$
 BEGIN
   UPDATE professors SET total_interactions = COALESCE(total_interactions, 0) + 1 WHERE id = p_id;

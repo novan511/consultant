@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Project — Professor Senate</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="stylesheet" href="/styles.css" />
+<style>
+body { background: var(--bg-0); overflow: auto; }
+.page { max-width: 900px; margin: 0 auto; padding: 20px 24px 60px; }
+.back { color: var(--accent-2); font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; margin-bottom: 16px; }
+.back:hover { color: var(--text); }
+.proj-header { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.proj-header h1 { font-size: 22px; margin: 0 0 6px; }
+.proj-header .desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; }
+.proj-header .vision { font-size: 13px; color: var(--accent-2); font-style: italic; }
+.status-bar { display: flex; gap: 4px; margin-bottom: 20px; flex-wrap: wrap; }
+.phase-dot { padding: 4px 10px; border-radius: 999px; font-size: 10px; font-weight: 600; text-transform: uppercase; background: var(--bg-2); color: var(--muted); border: 1px solid var(--line); transition: all .2s; }
+.phase-dot.current { border-color: var(--accent); color: var(--accent); background: rgba(124,58,237,.1); }
+.phase-dot.done { background: rgba(16,185,129,.1); color: var(--good); border-color: var(--good); }
+.actions { display: flex; gap: 8px; margin-bottom: 20px; }
+.actions button { padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.advance-btn { background: var(--accent); color: #fff; border: none; }
+.advance-btn:hover { opacity: .85; }
+.advance-btn:disabled { opacity: .4; cursor: not-allowed; }
+.timeline { margin-bottom: 24px; }
+.timeline h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 12px; }
+.phase-entry { display: flex; gap: 12px; margin-bottom: 16px; }
+.phase-marker { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: 24px; }
+.phase-dot-sm { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-0); }
+.phase-line { width: 2px; flex: 1; background: var(--line); margin-top: 4px; }
+.phase-content { flex: 1; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.phase-content .meta { font-size: 10px; color: var(--muted); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.phase-content .prof-name { color: var(--accent); font-weight: 600; }
+.phase-content .phase-label { padding: 1px 6px; border-radius: 999px; font-size: 9px; text-transform: uppercase; font-weight: 600; }
+.phase-content .body { font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; }
+.comments { margin-top: 24px; }
+.comments h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 10px; }
+.comment { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 6px; }
+.comment .author { font-size: 11px; font-weight: 600; color: var(--accent-2); margin-bottom: 3px; }
+.comment .body { font-size: 12px; line-height: 1.5; }
+.comment .time { font-size: 10px; color: var(--muted); margin-top: 3px; }
+.comment-form { display: flex; gap: 8px; margin-top: 10px; }
+.comment-form input { flex: 1; }
+.comment-form button { background: var(--accent-2); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.status-current { text-align: center; padding: 12px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 20px; }
+.status-current .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.status-current .value { font-size: 16px; font-weight: 700; color: var(--accent); margin-top: 4px; }
+.status-current .summary { font-size: 12px; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <a href="/" style="text-decoration:none;color:inherit;display:flex;align-items:baseline;gap:8px;">
+        <span class="logo">⚛</span><span class="title">Professor Senate</span>
+      </a>
+    </div>
+    <div class="controls">
+      <a href="/projects" style="color:var(--accent);font-size:13px;text-decoration:none;font-weight:600;">Projects</a>
+    </div>
+  </header>
+  <div class="page" id="page"><div style="text-align:center;padding:60px;color:var(--muted);">Loading project…</div></div>
+  <script>
+    const $ = s => document.querySelector(s);
+    const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const time = ts => { try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } };
+    const PHASES = ['ideation','hypothesis','research','debate','experimentation','refinement','results','published'];
+    const phaseColors = { ideation:'#a855f7',hypothesis:'#60a5fa',research:'#22d3ee',debate:'#fbbf24',experimentation:'#34d399',refinement:'#f472b6',results:'#f87171',published:'#4ade80' };
+    let proj = null;
+
+    async function load() {
+      const id = location.pathname.split('/').pop();
+      try {
+        proj = await fetch(`/api/projects/${id}`).then(r=>r.json());
+        if (proj.error) throw new Error(proj.error);
+        document.title = `${proj.title} — Professor Senate`;
+        render();
+      } catch(e) { $('#page').innerHTML = `<div class="empty">Error: ${esc(e.message)}</div><a href="/projects" class="back">← Back</a>`; }
+    }
+
+    function render() {
+      const p = proj;
+      const currentIdx = PHASES.indexOf(p.status);
+      $('#page').innerHTML = `
+        <a href="/projects" class="back">← All Projects</a>
+        <div class="proj-header">
+          <h1>${esc(p.title)}</h1>
+          <div class="desc">${esc(p.description)}</div>
+          <div class="vision">${esc(p.vision)}</div>
+        </div>
+        <div class="status-current">
+          <div class="label">Current Phase</div>
+          <div class="value">${esc(p.status.toUpperCase())}</div>
+          <div class="summary">${esc(p.phase_summary||'')}</div>
+        </div>
+        <div class="status-bar">
+          ${PHASES.map((ph, i) => {
+            const cls = i < currentIdx ? 'done' : i === currentIdx ? 'current' : '';
+            return `<span class="phase-dot ${cls}">${ph}</span>`;
+          }).join('')}
+        </div>
+        <div class="actions">
+          <button class="advance-btn" id="advanceBtn" onclick="advancePhase()" ${p.status==='published'?'disabled':''}>▶ Advance to Next Phase</button>
+          <span style="font-size:11px;color:var(--muted);align-self:center;">${(p.assigned_professors||[]).length} professor(s) assigned</span>
+        </div>
+        <div class="timeline">
+          <h3>Research Timeline (${(p.phases||[]).length} entries)</h3>
+          ${(p.phases||[]).map((ph, i) => `
+            <div class="phase-entry">
+              <div class="phase-marker">
+                <div class="phase-dot-sm" style="background:${phaseColors[ph.phase]||'var(--accent)'}"></div>
+                ${i < (p.phases||[]).length - 1 ? '<div class="phase-line"></div>' : ''}
+              </div>
+              <div class="phase-content">
+                <div class="meta">
+                  <span class="prof-name">${esc(ph.professor_name)}</span>
+                  <span class="phase-label" style="background:${phaseColors[ph.phase]||'var(--bg-3)'}33;color:${phaseColors[ph.phase]||'var(--muted)'}">${esc(ph.phase)}</span>
+                  <span>${time(ph.created_at)}</span>
+                  ${ph.metadata?.auto ? '<span style="color:var(--warn);">⚡ auto</span>' : ''}
+                </div>
+                <div class="body">${esc(ph.content)}</div>
+              </div>
+            </div>`).join('') || '<div style="color:var(--muted);font-size:13px;padding:20px;">No phases yet. Click "Advance" to start.</div>'}
+        </div>
+        <div class="comments">
+          <h3>User Comments (${(p.comments||[]).length})</h3>
+          ${(p.comments||[]).map(c => `
+            <div class="comment">
+              <div class="author">${esc(c.author)}</div>
+              <div class="body">${esc(c.content)}</div>
+              <div class="time">${time(c.created_at)}</div>
+            </div>`).join('') || '<div style="color:var(--muted);font-size:12px;margin-bottom:8px;">No comments yet.</div>'}
+          <div class="comment-form">
+            <input id="commentInput" placeholder="Add your comment or direction…" />
+            <button onclick="postComment()">Send</button>
+          </div>
+        </div>
+      `;
+    }
+
+    async function advancePhase() {
+      const btn = $('#advanceBtn');
+      btn.disabled = true;
+      btn.textContent = 'Working…';
+      try {
+        const r = await fetch(`/api/projects/${proj.id}/advance`, { method:'POST', headers:{'Content-Type':'application/json'} });
+        const j = await r.json();
+        if (j.ok) { await load(); }
+        else { alert(j.error || 'Failed'); btn.disabled = false; btn.textContent = '▶ Advance'; }
+      } catch(e) { alert('Network error'); btn.disabled = false; btn.textContent = '▶ Advance'; }
+    }
+
+    async function postComment() {
+      const input = $('#commentInput');
+      const content = input.value.trim();
+      if (!content) return;
+      input.value = '';
+      await fetch(`/api/projects/${proj.id}/comment`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ author:'user', content })
+      });
+      await load();
+    }
+    load();
+  </script>
+</body>
+</html>

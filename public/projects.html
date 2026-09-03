@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Research Projects — Professor Senate</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="stylesheet" href="/styles.css" />
+<style>
+body { background: var(--bg-0); overflow: auto; }
+.page { max-width: 900px; margin: 0 auto; padding: 20px 24px 60px; }
+.page h1 { font-size: 22px; margin-bottom: 4px; }
+.page .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+.new-form { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 24px; }
+.new-form h3 { font-size: 13px; margin-bottom: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.new-form input, .new-form textarea { width: 100%; margin-bottom: 8px; padding: 8px 10px; font-size: 13px; }
+.new-form textarea { height: 60px; resize: vertical; }
+.new-form button { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.new-form button:hover { opacity: .9; }
+.project-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 10px; cursor: pointer; transition: border-color .2s, transform .2s; text-decoration: none; color: inherit; display: block; }
+.project-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.proj-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.proj-desc { font-size: 12px; color: var(--muted); margin-bottom: 8px; line-height: 1.4; }
+.proj-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; padding: 3px 8px; border-radius: 999px; }
+.proj-phase { padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.phase-ideation { background: #7c3aed22; color: #a855f7; }
+.phase-hypothesis { background: #3b82f622; color: #60a5fa; }
+.phase-research { background: #06b6d422; color: #22d3ee; }
+.phase-debate { background: #f59e0b22; color: #fbbf24; }
+.phase-experimentation { background: #10b98122; color: #34d399; }
+.phase-refinement { background: #ec489922; color: #f472b6; }
+.phase-results { background: #ef444422; color: #f87171; }
+.phase-published { background: #22c55e22; color: #4ade80; }
+.proj-profs { font-size: 11px; color: var(--muted); margin-top: 6px; }
+.proj-time { font-size: 10px; color: var(--muted); margin-top: 4px; }
+.empty { text-align: center; color: var(--muted); padding: 40px; font-size: 14px; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <a href="/" style="text-decoration:none;color:inherit;display:flex;align-items:baseline;gap:8px;">
+        <span class="logo">⚛</span><span class="title">Professor Senate</span>
+      </a>
+    </div>
+    <div class="controls">
+      <a href="/projects" style="color:var(--accent);font-size:13px;text-decoration:none;font-weight:600;">Projects</a>
+    </div>
+  </header>
+  <div class="page">
+    <h1>Research Projects</h1>
+    <div class="sub">Collaborative inventions researched by 50 professors. Each project progresses through: Ideation → Hypothesis → Research → Debate → Experimentation → Refinement → Results → Published.</div>
+    <div class="new-form">
+      <h3>New Project</h3>
+      <input id="newTitle" placeholder="Project title (e.g. 'Room-temperature superconductor via...')" />
+      <textarea id="newDesc" placeholder="Description — what is this invention?"></textarea>
+      <textarea id="newVision" placeholder="Vision — how does this help humanity?"></textarea>
+      <button onclick="createProject()">Create & Start Research</button>
+    </div>
+    <div id="projectList"><div class="empty">Loading projects…</div></div>
+  </div>
+  <script>
+    async function loadProjects() {
+      const r = await fetch('/api/projects').then(r=>r.json()).catch(()=>[]);
+      const el = document.getElementById('projectList');
+      if (!r.length) { el.innerHTML = '<div class="empty">No projects yet. Create one above!</div>'; return; }
+      el.innerHTML = r.map(p => `
+        <a href="/projects/${p.id}" class="project-card">
+          <div class="proj-title">${esc(p.title)}</div>
+          <div class="proj-desc">${esc((p.description||'').slice(0,200))}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span class="proj-phase phase-${p.status}">${p.status}</span>
+            <span class="proj-time">Updated ${time(p.updated_at)}</span>
+          </div>
+          <div class="proj-profs">${(p.assigned_professors||[]).length} professor(s) assigned · ${p.phase_summary||''}</div>
+        </a>`).join('');
+    }
+    async function createProject() {
+      const title = document.getElementById('newTitle').value.trim();
+      const description = document.getElementById('newDesc').value.trim();
+      const vision = document.getElementById('newVision').value.trim();
+      if (!title) return alert('Title required');
+      const r = await fetch('/api/projects', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title, description, vision }) });
+      const p = await r.json();
+      if (p.id) location.href = '/projects/' + p.id;
+      else alert(p.error || 'Failed');
+    }
+    function esc(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function time(ts) { try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+    loadProjects();
+  </script>
+</body>
+</html>
