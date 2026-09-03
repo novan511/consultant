@@ -50,13 +50,13 @@ app.post('/api/ask', async (req, res) => {
     try {
       const p = senate.professors.get(professor_id);
       if (!p) return res.status(404).json({ error: 'professor not found' });
-      const out = await p.ask(prompt, { temperature: 0.7, max_tokens: 1800 });
+      const out = await p.ask(prompt, { temperature: 0.7, max_tokens: 800 });
       const j = await p.journal('response', { title: `Reply: ${prompt.slice(0, 60)}`, content: out.content, user_prompt: prompt });
       return res.json({ answers: [{ professor_id, professor_name: p.record.name, expertise: p.record.expertise, content: out.content, model: out.model, journal_id: j?.id }] });
     } catch (e) { return res.status(500).json({ error: String(e) }); }
   }
 
-  // SSE streaming: route to top 3 professors, send answers as they arrive.
+  // SSE streaming: route to 1 best professor (fastest response).
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -64,7 +64,7 @@ app.post('/api/ask', async (req, res) => {
     'X-Accel-Buffering': 'no'
   });
 
-  // Find best professors (cheap, no LLM).
+  // Find best professor (cheap, no LLM).
   const scored = senate.roster.map(r => {
     const fields = [...(r.expertise || []), ...(r.subfields || [])].join(' ').toLowerCase();
     let s = 0;
@@ -73,7 +73,7 @@ app.post('/api/ask', async (req, res) => {
     }
     return { r, s };
   }).sort((a, b) => b.s - a.s);
-  const top = scored.filter(x => x.s > 0).slice(0, 3).map(x => x.r);
+  const top = scored.filter(x => x.s > 0).slice(0, 1).map(x => x.r);
   if (top.length === 0) top.push(scored[0].r);
 
   // Persist user prompt.
@@ -85,7 +85,7 @@ app.post('/api/ask', async (req, res) => {
   const tasks = top.map(async (r) => {
     const prof = senate.professors.get(r.id);
     try {
-      const { content, model } = await prof.ask(prompt, { temperature: 0.7, max_tokens: 1800 });
+      const { content, model } = await prof.ask(prompt, { temperature: 0.7, max_tokens: 800 });
       const journal = await prof.journal('response', {
         title: `Reply to user: ${prompt.slice(0, 60)}`, content, topic: prompt, user_prompt: prompt, metadata: { model }
       });
