@@ -184,4 +184,5 @@ export async function chat(modelId, messages, opts = {}) {
   }
 }
 
-export { rawChat };
+export { chat as rawChat } from '../llm.js';
+export { MODEL_IDS } from '../llm.js';

@@ -1,6 +1,6 @@
 // Professor agent — owns an LLM, expertise, memory (learnings), and emits journal/log
 // rows to Supabase. Each instance is independent; the Senate orchestrates them.
-import { chat, MODEL_IDS } from './llm.js';
+import { chat, MODEL_IDS } from './lib/llm-manager.js';
 import { supabase } from './supabase.js';
 
 const SYSTEM_PROMPT = (p, profile) => {

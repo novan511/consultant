@@ -9,6 +9,7 @@ import { Senate } from './senate.js';
 import { supabase, ping } from './supabase.js';
 import { initTelegram, stopTelegram } from './telegram.js';
 import { projectLoop } from './lib/project-logic.js';
+import spectator from './lib/spectator.js';
 import { log } from './lib/logger.js';
 import { getCostSummary, getCircuitStatus } from './lib/llm-manager.js';
 import { PORT, JSON_BODY_LIMIT } from './lib/constants.js';
@@ -28,6 +29,14 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
+
+// Anti-crawl headers
+app.use((req, res, next) => {
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive, nosnippet');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+});
+
 app.use(express.static(path.join(__dirname, '..', '..', 'public')));
 
 // Serve Supabase config to frontend (anon key is safe to expose)
@@ -75,6 +84,15 @@ async function main() {
   log('info', 'boot', 'Senate created, booting...');
   await ctx.senate.boot();
   log('info', 'boot', 'Senate booted');
+
+  // Boot spectator (observes all professor activity)
+  await spectator.boot();
+  log('info', 'boot', 'Spectator booted');
+
+  // Start spectator sync loop (every 15s)
+  setInterval(async () => {
+    try { await spectator.sync(); } catch (e) { log('error', 'spectator', `Sync error: ${e.message}`); }
+  }, 15000);
 
   log('info', 'boot', 'Starting Telegram...');
   await initTelegram(ctx.senate);

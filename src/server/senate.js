@@ -4,11 +4,11 @@ import { getFeed, matchFeedToProfessor } from './feed.js';
 import { supabase } from './supabase.js';
 import { chat as llmChat } from './lib/llm-manager.js';
 import { MODEL_IDS } from './llm.js';
+import { log } from './lib/logger.js';
 import {
-  TICK_INTERVAL_MS, TICK_OVERHEAD_MS, PARALLEL_TICKERS, MAX_TICK_DURATION_MS,
+  TICK_INTERVAL_MS, TICK_OVERHEAD_MS, PARALLEL_TICKERS,
   DEBATE_PROBABILITY, DEBATE_ROUNDS, LEARN_PROBABILITY,
-  DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, REFLECTION_TEMPERATURE,
-  DEBATE_TEMPERATURE, JUDGE_TEMPERATURE, ROUTING_TEMPERATURE
+  REFLECTION_TEMPERATURE, JUDGE_TEMPERATURE, ROUTING_TEMPERATURE
 } from './lib/constants.js';
 
 const DEBATE_PROB = DEBATE_PROBABILITY;

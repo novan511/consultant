@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { buildRoster, PROFESSORS, PERSONALITY_PROFILES } from '../src/server/professors.js';
 import { Professor } from '../src/server/professor.js';
 import { Senate } from '../src/server/senate.js';
-import { MODEL_IDS } from '../src/server/llm.js';
 import { tokenize, scoreByKeywords, rankProfessors, pickTopProfessors } from '../src/server/lib/router.js';
 import { buildPhasePrompts, isRefusal, PHASE_ORDER } from '../src/server/lib/prompts.js';
 import { log } from '../src/server/lib/logger.js';

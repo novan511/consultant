@@ -1,5 +1,5 @@
 // LLM router — dual provider: NVIDIA (primary) + OpenRouter free models (fallback).
-// ALL keys must come from .env. No hard-coded fallbacks.
+// Dynamic pool: models are assigned at runtime, not hardcoded per professor.
 import OpenAI from 'openai';
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
@@ -20,20 +20,62 @@ const NVIDIA_MODELS = {
   'poolside/laguna-xs-2.1':                    process.env.NVIDIA_LAGUNA_XS_21
 };
 
-// OpenRouter free models
+// OpenRouter free models (all 18 — updated Sep 2026)
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_FREE_MODELS = [
-  'deepseek/deepseek-chat-v3-0324:free',
-  'google/gemma-3-27b-it:free',
-  'meta-llama/llama-4-maverick:free',
+  // Frontier reasoning
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
+  'z-ai/glm-5.2:free',
+  'minimax/minimax-m3:free',
   'qwen/qwen3-235b-a22b:free',
-  'microsoft/phi-4-reasoning-plus:free',
-  'mistralai/mistral-small-3.2-24b-instruct:free'
+  // Multimodal
+  'google/gemma-4-31b-it:free',
+  'minimax/minimax-m2.7:free',
+  // Agentic/coding
+  'thinkingmachines/inkling:free',
+  'poolside/laguna-s-2.1:free',
+  // Fast/compact
+  'nvidia/nemotron-3.5-lightning:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'liquid/lfm-2.5-2.6b:free',
+  // Specialist
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+  'nvidia/nemotron-3.5-content-safety:free',
+  'cohere/north-mini-code:free',
+  'poolside/laguna-xs-2.1:free',
+  'thinkingmachines/inkling-small:free',
+  'inclusionai/ling-3.0-flash-fin:free'
 ];
+
+// Model tiers — for dynamic assignment
+const MODEL_TIERS = {
+  // Best for complex reasoning, debates, research
+  heavy: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'qwen/qwen3-235b-a22b:free', 'z-ai/glm-5.2:free', 'thinkingmachines/inkling:free', 'minimax/minimax-m3:free'],
+  // Good for general tasks, learning, discussions
+  medium: ['nvidia/nemotron-3-super-120b-a12b:free', 'google/gemma-4-31b-it:free', 'minimax/minimax-m2.7:free', 'thinkingmachines/inkling-small:free', 'poolside/laguna-s-2.1:free'],
+  // Fast, for tick/reflection/routing
+  fast: ['nvidia/nemotron-3.5-lightning:free', 'google/gemma-4-26b-a4b-it:free', 'liquid/lfm-2.5-2.6b:free', 'poolside/laguna-xs-2.1:free', 'cohere/north-mini-code:free'],
+  // Specialist
+  special: ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'nvidia/nemotron-3.5-content-safety:free', 'inclusionai/ling-3.0-flash-fin:free']
+};
 
 const ALL_NVIDIA = Object.keys(NVIDIA_MODELS).filter(k => NVIDIA_MODELS[k]);
 const ALL_MODEL_KEYS = [...ALL_NVIDIA, ...OPENROUTER_FREE_MODELS];
+
+// Round-robin index for default assignment
+let roundRobinIdx = 0;
 function modelFor(index) { return ALL_MODEL_KEYS[index % ALL_MODEL_KEYS.length]; }
+
+// Dynamic model selection: pick best available model for a task type
+export function selectModel(taskType = 'medium') {
+  const tier = MODEL_TIERS[taskType] || MODEL_TIERS.medium;
+  // Try tier models, fallback to any available
+  const available = [...tier, ...OPENROUTER_FREE_MODELS];
+  const model = available[roundRobinIdx % available.length];
+  roundRobinIdx++;
+  return model;
+}
 
 const clientCache = new Map();
 const chainLocks = new Map();
@@ -112,4 +154,4 @@ export const MODEL_IDS = {
   'laguna-xs-2.1':         'poolside/laguna-xs-2.1'
 };
 
-export { OPENROUTER_FREE_MODELS, NVIDIA_MODELS };
+export { OPENROUTER_FREE_MODELS, NVIDIA_MODELS, MODEL_TIERS, ALL_MODEL_KEYS, modelFor };

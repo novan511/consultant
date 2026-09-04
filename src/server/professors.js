@@ -12,8 +12,7 @@ const MODELS = {
   'nemotron-3-super':       { id: 'nvidia/nemotron-3-super-120b-a12b',  vision: false, thinking: true  },
   'muse-glimmer-30b':       { id: 'meta/muse-glimmer-30b',              vision: false, thinking: false },
   'kimi-k3':                { id: 'moonshotai/kimi-k3',                 vision: true,  thinking: true  },
-  'laguna-xs-2.1':          { id: 'poolside/laguna-xs-2.1',             vision: false, thinking: false },
-  'diffusiongemma-26b':     { id: 'google/diffusiongemma-26b-a4b-it',   vision: true,  thinking: true  }
+  'laguna-xs-2.1':          { id: 'poolside/laguna-xs-2.1',             vision: false, thinking: false }
 };
 
 const ALL_MODEL_KEYS = Object.keys(MODELS);

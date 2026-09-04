@@ -1,7 +1,7 @@
 // Route: /api/projects/*
 import { Router } from 'express';
 import { supabase } from '../supabase.js';
-import { advanceProject, runDiscussion, smartAssign } from '../lib/project-logic.js';
+import { advanceProject, runDiscussion } from '../lib/project-logic.js';
 import { generateProjectPDF } from '../lib/pdf.js';
 import { log } from '../lib/logger.js';
 import ctx from '../lib/context.js';

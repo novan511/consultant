@@ -1,7 +1,8 @@
 // Project logic — advance, discuss, smartAssign, projectLoop.
 // Extracted from the old monolithic index.js.
 import { supabase } from '../supabase.js';
-import { chat, MODEL_IDS } from '../llm.js';
+import { chat } from './llm-manager.js';
+import { MODEL_IDS } from '../llm.js';
 import { getFeed } from '../feed.js';
 import { rankProfessors } from './router.js';
 import { buildPhasePrompts, isRefusal, PHASE_ORDER } from './prompts.js';

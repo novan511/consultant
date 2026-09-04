@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /
+
+# Professor Senate — private research platform
+# Not for public indexing or crawling.
