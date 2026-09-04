@@ -48,10 +48,13 @@ app.get('/api/config', (req, res) => {
 });
 
 app.get('/api/health', async (req, res) => {
-  try {
-    await ping();
-    res.json({ ok: true, professors: ctx.senate?.roster.length || 0, running: !!ctx.senate?.running });
-  } catch (e) { res.status(500).json({ ok: false, err: String(e) }); }
+  // Lightweight health check — don't ping Supabase (too slow on cold starts)
+  res.json({
+    ok: true,
+    professors: ctx.senate?.roster.length || 0,
+    running: !!ctx.senate?.running,
+    uptime: Math.round(process.uptime())
+  });
 });
 
 // LLM cost & circuit status
