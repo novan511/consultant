@@ -87,7 +87,8 @@ export default function askRoutes() {
         }
       }
     } catch (e) {
-      res.write(`data: ${JSON.stringify({ error: String(e) })}\n\n`);
+      const msg = String(e.message || e).replace(/^Error:\s*/, '');
+      res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);
     }
 
     res.write(`data: [DONE]\n\n`);

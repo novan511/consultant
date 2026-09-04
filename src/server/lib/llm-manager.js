@@ -132,56 +132,65 @@ export function getCircuitStatus() {
   return status;
 }
 
-// === Main exported chat function ===
+// === Main exported chat function (with auto-fallback) ===
 export async function chat(modelId, messages, opts = {}) {
-  // 1. Check circuit breaker
-  const circuit = checkCircuit(modelId);
-  if (!circuit.allowed) {
-    log('warn', 'llm', `Circuit open for ${modelId}, retry after ${circuit.retryAfterMs}ms`);
-    throw new Error(`Circuit breaker open for ${modelId}`);
+  const candidates = [modelId];
+  // Build fallback list: same tier → any free model
+  const allFree = [...MODEL_TIERS.heavy, ...MODEL_TIERS.medium, ...MODEL_TIERS.fast];
+  for (const m of allFree) {
+    if (m !== modelId && !candidates.includes(m)) candidates.push(m);
   }
 
-  // 2. Check rate limit
-  const rate = checkRateLimit(modelId);
-  if (!rate.allowed) {
-    log('warn', 'llm', `Rate limit hit for ${modelId}, waiting ${rate.waitMs}ms`);
-    await new Promise(r => setTimeout(r, rate.waitMs));
-    // Re-check after wait
-    const recheck = checkRateLimit(modelId);
-    if (!recheck.allowed) {
-      throw new Error(`Rate limit exceeded for ${modelId}`);
+  let lastError;
+  for (const candidate of candidates) {
+    // 1. Check circuit breaker
+    const circuit = checkCircuit(candidate);
+    if (!circuit.allowed) {
+      log('warn', 'llm', `Circuit open for ${candidate}, trying next`);
+      continue;
     }
-  }
 
-  // 3. Check prompt cache
-  if (opts.useCache !== false) {
-    const cached = getCached(modelId, messages);
-    if (cached) {
-      log('debug', 'llm', `Cache hit for ${modelId}`);
-      return cached;
+    // 2. Check rate limit
+    const rate = checkRateLimit(candidate);
+    if (!rate.allowed) {
+      log('warn', 'llm', `Rate limit hit for ${candidate}, trying next`);
+      continue;
     }
-  }
 
-  // 4. Call LLM with cost tracking
-  const start = Date.now();
-  try {
-    const result = await rawChat(modelId, messages, opts);
-    const latency = Date.now() - start;
-    recordSuccess(modelId);
-    recordCost(modelId, result.raw, latency);
-
-    // 5. Cache successful results
+    // 3. Check prompt cache
     if (opts.useCache !== false) {
-      setCache(modelId, messages, result);
+      const cached = getCached(candidate, messages);
+      if (cached) {
+        log('debug', 'llm', `Cache hit for ${candidate}`);
+        return cached;
+      }
     }
 
-    log('debug', 'llm', `OK ${modelId} in ${latency}ms, ${(result.raw?.usage?.total_tokens || '?')} tokens`);
-    return result;
-  } catch (e) {
-    recordFailure(modelId);
-    log('error', 'llm', `FAIL ${modelId}: ${e.message}`);
-    throw e;
+    // 4. Call LLM
+    const start = Date.now();
+    try {
+      const result = await rawChat(candidate, messages, opts);
+      const latency = Date.now() - start;
+      recordSuccess(candidate);
+      recordCost(candidate, result.raw, latency);
+
+      // 5. Cache successful result
+      if (opts.useCache !== false) setCache(candidate, messages, result);
+
+      if (candidate !== modelId) {
+        log('info', 'llm', `Fallback OK: ${candidate} (original ${modelId} failed) in ${latency}ms`);
+      } else {
+        log('debug', 'llm', `OK ${candidate} in ${latency}ms, ${(result.raw?.usage?.total_tokens || '?')} tokens`);
+      }
+      return result;
+    } catch (e) {
+      recordFailure(candidate);
+      log('warn', 'llm', `FAIL ${candidate}: ${e.message}`);
+      lastError = e;
+      continue; // Try next model
+    }
   }
+  throw lastError || new Error('All LLM models exhausted');
 }
 
 export { chat as rawChat } from '../llm.js';

@@ -473,7 +473,7 @@ $('#askForm').addEventListener('submit', async (ev) => {
         }
         try {
           const a = JSON.parse(data);
-          if (a.error) { addChat('System', `Error: ${a.error}`); continue; }
+          if (a.error) { addChat('System', a.error.replace(/^Error:\s*/, '')); continue; }
           if (!streaming[a.professor_id]) {
             streaming[a.professor_id] = addStreamingChat(`${a.professor_name} (${(a.expertise||[])[0]||''})`);
             streaming[a.professor_id].model = a.model;

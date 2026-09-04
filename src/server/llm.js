@@ -93,13 +93,13 @@ function getClient(modelId) {
     if (!apiKey) throw new Error(`No API key for model ${modelId}`);
     baseURL = NVIDIA_BASE;
   }
-  const c = new OpenAI({ apiKey, baseURL });
+  const c = new OpenAI({ apiKey, baseURL, timeout: 60000, maxRetries: 2 });
   clientCache.set(modelId, c);
   return c;
 }
 
 function buildBody(modelId, messages, opts = {}) {
-  const body = { model: modelId, messages, temperature: opts.temperature ?? 1, top_p: opts.top_p ?? 0.95, max_tokens: opts.max_tokens ?? 4096, stream: false };
+  const body = { model: modelId, messages, temperature: opts.temperature ?? 1, top_p: opts.top_p ?? 0.95, max_tokens: opts.max_tokens ?? 2048, stream: false };
   if (opts.seed !== undefined && !isOpenRouter(modelId)) body.seed = opts.seed;
   if (modelId === 'deepseek-ai/deepseek-v4-pro-0813') body.chat_template_kwargs = { thinking: false };
   else if (modelId === 'deepseek-ai/deepseek-v4-flash-0731') body.chat_template_kwargs = { thinking: true, reasoning_effort: 'high' };
