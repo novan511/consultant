@@ -674,17 +674,19 @@ function bindUI() {
     toast(state.showConnections ? 'Connections visible' : 'Connections hidden');
   });
 
-  // Offline detection
+  // Offline detection — grace period 5s before showing
   window.addEventListener('online', () => { $('#offlineBar')?.classList.remove('visible'); });
   window.addEventListener('offline', () => { $('#offlineBar')?.classList.add('visible'); });
-  // Periodic health check
-  setInterval(async () => {
-    try {
-      const r = await fetch('/api/health', { signal: AbortSignal.timeout(5000) });
-      if (!r.ok) throw new Error();
-      $('#offlineBar')?.classList.remove('visible');
-    } catch { $('#offlineBar')?.classList.add('visible'); }
-  }, 30000);
+  // Periodic health check (skip first 5s to avoid false positive on cold boot)
+  setTimeout(() => {
+    setInterval(async () => {
+      try {
+        const r = await fetch('/api/health', { signal: AbortSignal.timeout(5000) });
+        if (!r.ok) throw new Error();
+        $('#offlineBar')?.classList.remove('visible');
+      } catch { $('#offlineBar')?.classList.add('visible'); }
+    }, 30000);
+  }, 5000);
 }
 
 boot();
