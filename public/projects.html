@@ -16,6 +16,9 @@ body { background: var(--bg-0); overflow: auto; }
 .new-form textarea { height: 60px; resize: vertical; }
 .new-form button { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; }
 .new-form button:hover { opacity: .9; }
+.new-form h3 span { display:inline-block; transition:transform .2s; }
+#newFormBody.collapsed { display:none; }
+#newFormBody.collapsed ~ h3 span, .new-form h3.collapsed span { transform:rotate(-90deg); }
 .project-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 10px; cursor: pointer; transition: border-color .2s, transform .2s; text-decoration: none; color: inherit; display: block; }
 .project-card:hover { border-color: var(--accent); transform: translateY(-2px); }
 .proj-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
@@ -43,18 +46,23 @@ body { background: var(--bg-0); overflow: auto; }
       </a>
     </div>
     <div class="controls">
+      <a href="/" style="color:var(--accent-2);font-size:13px;text-decoration:none;">← Senate Board</a>
       <a href="/projects" style="color:var(--accent);font-size:13px;text-decoration:none;font-weight:600;">Projects</a>
     </div>
   </header>
   <div class="page">
     <h1>Research Projects</h1>
     <div class="sub">Collaborative inventions researched by 50 professors. Each project progresses through: Ideation → Hypothesis → Research → Debate → Experimentation → Refinement → Results → Published.</div>
-    <div class="new-form">
-      <h3>New Project</h3>
-      <input id="newTitle" placeholder="Project title (e.g. 'Room-temperature superconductor via...')" />
-      <textarea id="newDesc" placeholder="Description — what is this invention?"></textarea>
-      <textarea id="newVision" placeholder="Vision — how does this help humanity?"></textarea>
-      <button onclick="createProject()">Create & Start Research</button>
+    <div class="new-form" id="newForm">
+      <h3 onclick="document.getElementById('newFormBody').classList.toggle('collapsed')" style="cursor:pointer;display:flex;align-items:center;gap:6px;">
+        <span id="formArrow" style="transition:transform .2s;">▼</span> New Project
+      </h3>
+      <div id="newFormBody">
+        <input id="newTitle" placeholder="Project title (e.g. 'Room-temperature superconductor via...')" />
+        <textarea id="newDesc" placeholder="Description — what is this invention?"></textarea>
+        <textarea id="newVision" placeholder="Vision — how does this help humanity?"></textarea>
+        <button onclick="createProject()">Create & Start Research</button>
+      </div>
     </div>
     <div id="projectList"><div class="empty">Loading projects…</div></div>
   </div>

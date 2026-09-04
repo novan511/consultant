@@ -28,7 +28,9 @@ function withTimeout(promise, ms) {
 }
 
 export function fireAndForget(promise) {
-  promise.then(() => {}, () => {});
+  promise.then(() => {}, (e) => {
+    console.warn('[fire-and-forget] Error:', e.message);
+  });
 }
 
 export async function ping() {

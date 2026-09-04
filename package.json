@@ -9,7 +9,9 @@
     "dev": "node --watch src/server/index.js",
     "setup-db": "node src/server/setup-db.js",
     "seed": "node src/server/seed.js",
-    "test": "node tests/smoke.test.js"
+    "test": "node tests/smoke.test.js",
+    "lint": "eslint src/ tests/ --ext .js",
+    "lint:fix": "eslint src/ tests/ --ext .js --fix"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
@@ -21,5 +23,8 @@
     "openai": "^4.62.0",
     "pdfkit": "^0.20.2",
     "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
   }
 }

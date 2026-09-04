@@ -68,9 +68,15 @@ CREATE TABLE IF NOT EXISTS debates (
   status TEXT DEFAULT 'open',
   turns JSONB DEFAULT '[]'::jsonb,
   conclusion TEXT,
+  scores JSONB DEFAULT '{}'::jsonb,
+  consensus_points JSONB DEFAULT '[]'::jsonb,
+  winner TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
+ALTER TABLE debates ADD COLUMN IF NOT EXISTS scores JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE debates ADD COLUMN IF NOT EXISTS consensus_points JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE debates ADD COLUMN IF NOT EXISTS winner TEXT;
 
 CREATE TABLE IF NOT EXISTS learnings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -138,6 +144,63 @@ CREATE TABLE IF NOT EXISTS project_comments (
 );
 CREATE INDEX IF NOT EXISTS idx_pc_comments_project ON project_comments(project_id);
 
+-- ============================================================
+-- PEER REVIEWS — professors review each other's work
+-- ============================================================
+CREATE TABLE IF NOT EXISTS peer_reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  phase_id UUID REFERENCES project_phases(id) ON DELETE CASCADE,
+  reviewer_id TEXT REFERENCES professors(id) ON DELETE SET NULL,
+  reviewer_name TEXT,
+  overall_score INT DEFAULT 5,
+  novelty INT DEFAULT 5,
+  methodology INT DEFAULT 5,
+  evidence_quality INT DEFAULT 5,
+  clarity INT DEFAULT 5,
+  strengths JSONB DEFAULT '[]'::jsonb,
+  weaknesses JSONB DEFAULT '[]'::jsonb,
+  critical_questions JSONB DEFAULT '[]'::jsonb,
+  suggested_improvements JSONB DEFAULT '[]'::jsonb,
+  verdict TEXT DEFAULT 'revise',
+  review_commentary TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pr_project ON peer_reviews(project_id);
+CREATE INDEX IF NOT EXISTS idx_pr_reviewer ON peer_reviews(reviewer_id);
+
+-- ============================================================
+-- DEBATE STATS — aggregated win/loss/draw per professor
+-- ============================================================
+CREATE TABLE IF NOT EXISTS debate_stats (
+  professor_id TEXT PRIMARY KEY REFERENCES professors(id) ON DELETE CASCADE,
+  wins INT DEFAULT 0,
+  losses INT DEFAULT 0,
+  draws INT DEFAULT 0,
+  total_debates INT DEFAULT 0,
+  avg_logic_score REAL DEFAULT 0,
+  avg_evidence_score REAL DEFAULT 0,
+  avg_persuasiveness_score REAL DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- ============================================================
+-- FACT CHECKS — validation of research claims
+-- ============================================================
+CREATE TABLE IF NOT EXISTS fact_checks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  checker_id TEXT REFERENCES professors(id) ON DELETE SET NULL,
+  checker_name TEXT,
+  content_checked TEXT,
+  overall_credibility INT DEFAULT 5,
+  claims JSONB DEFAULT '[]'::jsonb,
+  key_gaps JSONB DEFAULT '[]'::jsonb,
+  suggested_references JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_fc_project ON fact_checks(project_id);
+
 -- Atomic counter bumps
 CREATE OR REPLACE FUNCTION bump_professor_interactions(p_id TEXT) RETURNS void AS $$
 BEGIN
@@ -154,12 +217,58 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Update debate stats when a debate is concluded
+CREATE OR REPLACE FUNCTION update_debate_stats() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.status = 'concluded' AND (OLD.status IS DISTINCT FROM 'concluded') THEN
+    -- Ensure both debaters have stats rows
+    INSERT INTO debate_stats (professor_id) VALUES (NEW.participants[1]) ON CONFLICT DO NOTHING;
+    INSERT INTO debate_stats (professor_id) VALUES (NEW.participants[2]) ON CONFLICT DO NOTHING;
+
+    IF NEW.winner = 'tie' THEN
+      UPDATE debate_stats SET draws = draws + 1, total_debates = total_debates + 1, updated_at = now()
+        WHERE professor_id IN (NEW.participants[1], NEW.participants[2]);
+    ELSE
+      UPDATE debate_stats SET wins = wins + 1, total_debates = total_debates + 1, updated_at = now()
+        WHERE professor_id = NEW.winner;
+      UPDATE debate_stats SET losses = losses + 1, total_debates = total_debates + 1, updated_at = now()
+        WHERE professor_id IN (NEW.participants[1], NEW.participants[2]) AND professor_id != NEW.winner;
+    END IF;
+
+    -- Update average scores from debate scores JSONB
+    IF NEW.scores ? 'scores' THEN
+      UPDATE debate_stats SET
+        avg_logic_score = COALESCE((NEW.scores->'scores'->'professor_a'->>'logic')::real, avg_logic_score),
+        avg_evidence_score = COALESCE((NEW.scores->'scores'->'professor_a'->>'evidence')::real, avg_evidence_score),
+        avg_persuasiveness_score = COALESCE((NEW.scores->'scores'->'professor_a'->>'persuasiveness')::real, avg_persuasiveness_score)
+        WHERE professor_id = NEW.participants[1];
+      UPDATE debate_stats SET
+        avg_logic_score = COALESCE((NEW.scores->'scores'->'professor_b'->>'logic')::real, avg_logic_score),
+        avg_evidence_score = COALESCE((NEW.scores->'scores'->'professor_b'->>'evidence')::real, avg_evidence_score),
+        avg_persuasiveness_score = COALESCE((NEW.scores->'scores'->'professor_b'->>'persuasiveness')::real, avg_persuasiveness_score)
+        WHERE professor_id = NEW.participants[2];
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_update_debate_stats ON debates;
+CREATE TRIGGER trg_update_debate_stats
+  AFTER UPDATE ON debates
+  FOR EACH ROW
+  WHEN (NEW.status = 'concluded' AND OLD.status IS DISTINCT FROM 'concluded')
+  EXECUTE FUNCTION update_debate_stats();
+
 -- Realtime: idempotent add (skip if already in publication).
 DO $$
 BEGIN
-  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE journals;   EXCEPTION WHEN duplicate_object THEN NULL; END;
-  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE logs;       EXCEPTION WHEN duplicate_object THEN NULL; END;
-  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE debates;    EXCEPTION WHEN duplicate_object THEN NULL; END;
-  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE professors; EXCEPTION WHEN duplicate_object THEN NULL; END;
-  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE learnings;  EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE journals;       EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE logs;           EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE debates;        EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE professors;     EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE learnings;      EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE peer_reviews;   EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE debate_stats;   EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE fact_checks;    EXCEPTION WHEN duplicate_object THEN NULL; END;
 END$$;

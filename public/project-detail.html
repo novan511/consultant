@@ -8,6 +8,11 @@
 <style>
 body { background: var(--bg-0); overflow: auto; }
 .page { max-width: 900px; margin: 0 auto; padding: 20px 24px 60px; }
+.breadcrumb { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin-bottom:16px; }
+.breadcrumb a { color:var(--accent-2); text-decoration:none; }
+.breadcrumb a:hover { color:var(--text); }
+.bc-sep { color:var(--line); }
+.bc-current { color:var(--text); font-weight:600; }
 .back { color: var(--accent-2); font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; margin-bottom: 16px; }
 .back:hover { color: var(--text); }
 .proj-header { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
@@ -24,7 +29,10 @@ body { background: var(--bg-0); overflow: auto; }
 .advance-btn:hover { opacity: .85; }
 .advance-btn:disabled { opacity: .4; cursor: not-allowed; }
 .timeline { margin-bottom: 24px; }
-.timeline h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 12px; }
+.timeline h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 12px; cursor: pointer; }
+.timeline h3:hover { color: var(--text); }
+.timeline-entries.collapsed { display:none; }
+.timeline-entries.collapsed + h3 span, .timeline h3.collapsed span { transform:rotate(-90deg); }
 .phase-entry { display: flex; gap: 12px; margin-bottom: 16px; }
 .phase-marker { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: 24px; }
 .phase-dot-sm { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-0); }
@@ -44,7 +52,9 @@ body { background: var(--bg-0); overflow: auto; }
 .comment-form input { flex: 1; }
 .comment-form button { background: var(--accent-2); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
 .discussion-section { margin-bottom: 24px; }
-.discussion-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 10px; }
+.discussion-section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 10px; cursor: pointer; }
+.discussion-section h3:hover { color: var(--text); }
+#discussionThread.collapsed { display:none; }
 .disc-turn { display: flex; gap: 10px; margin-bottom: 12px; animation: entrySlide .35s var(--spring-snap) both; }
 .disc-turn:nth-child(1) { animation-delay: 0ms; }
 .disc-turn:nth-child(2) { animation-delay: 60ms; }
@@ -146,7 +156,11 @@ body { background: var(--bg-0); overflow: auto; }
       const p = proj;
       const currentIdx = PHASES.indexOf(p.status);
       $('#page').innerHTML = `
-        <a href="/projects" class="back">← All Projects</a>
+        <div class="breadcrumb">
+          <a href="/">Senate</a> <span class="bc-sep">›</span>
+          <a href="/projects">Projects</a> <span class="bc-sep">›</span>
+          <span class="bc-current">${esc(p.title)}</span>
+        </div>
         <div class="proj-header">
           <h1>${esc(p.title)}</h1>
           <div class="desc">${esc(p.description)}</div>
@@ -169,7 +183,9 @@ body { background: var(--bg-0); overflow: auto; }
           <span style="font-size:11px;color:var(--muted);align-self:center;">${(p.assigned_professors||[]).length} professor(s) assigned</span>
         </div>
         <div class="discussion-section">
-          <h3>Professor Discussion</h3>
+          <h3 onclick="document.getElementById('discussionThread').classList.toggle('collapsed')" style="cursor:pointer;display:flex;align-items:center;gap:6px;">
+            <span style="transition:transform .2s;display:inline-block;">▼</span> Professor Discussion
+          </h3>
           <div id="discussionThread">
             ${(p.phases||[]).filter(ph => ph.phase === 'discussion').length === 0
               ? '<div style="color:var(--muted);font-size:12px;margin-bottom:10px;">No discussions yet. Click "Trigger Discussion" to start a debate between professors.</div>'
@@ -178,23 +194,27 @@ body { background: var(--bg-0); overflow: auto; }
           </div>
         </div>
         <div class="timeline">
-          <h3>Research Timeline (${(p.phases||[]).length} entries)</h3>
-          ${(p.phases||[]).map((ph, i) => `
-            <div class="phase-entry">
-              <div class="phase-marker">
-                <div class="phase-dot-sm" style="background:${phaseColors[ph.phase]||'var(--accent)'}"></div>
-                ${i < (p.phases||[]).length - 1 ? '<div class="phase-line"></div>' : ''}
-              </div>
-              <div class="phase-content">
-                <div class="meta">
-                  <span class="prof-name">${esc(ph.professor_name)}</span>
-                  <span class="phase-label" style="background:${phaseColors[ph.phase]||'var(--bg-3)'}33;color:${phaseColors[ph.phase]||'var(--muted)'}">${esc(ph.phase)}</span>
-                  <span>${time(ph.created_at)}</span>
-                  ${ph.metadata?.auto ? '<span style="color:var(--warn);">⚡ auto</span>' : ''}
+          <h3 onclick="document.querySelector('.timeline-entries').classList.toggle('collapsed')" style="cursor:pointer;display:flex;align-items:center;gap:6px;">
+            <span style="transition:transform .2s;display:inline-block;">▼</span> Research Timeline (${(p.phases||[]).length} entries)
+          </h3>
+          <div class="timeline-entries">
+            ${(p.phases||[]).map((ph, i) => `
+              <div class="phase-entry">
+                <div class="phase-marker">
+                  <div class="phase-dot-sm" style="background:${phaseColors[ph.phase]||'var(--accent)'}"></div>
+                  ${i < (p.phases||[]).length - 1 ? '<div class="phase-line"></div>' : ''}
                 </div>
-                <div class="body">${esc(ph.content)}</div>
-              </div>
-            </div>`).join('') || '<div style="color:var(--muted);font-size:13px;padding:20px;">No phases yet. Click "Advance" to start.</div>'}
+                <div class="phase-content">
+                  <div class="meta">
+                    <span class="prof-name">${esc(ph.professor_name)}</span>
+                    <span class="phase-label" style="background:${phaseColors[ph.phase]||'var(--bg-3)'}33;color:${phaseColors[ph.phase]||'var(--muted)'}">${esc(ph.phase)}</span>
+                    <span>${time(ph.created_at)}</span>
+                    ${ph.metadata?.auto ? '<span style="color:var(--warn);">⚡ auto</span>' : ''}
+                  </div>
+                  <div class="body">${esc(ph.content)}</div>
+                </div>
+              </div>`).join('') || '<div style="color:var(--muted);font-size:13px;padding:20px;">No phases yet. Click "Advance" to start.</div>'}
+          </div>
         </div>
         <div class="comments">
           <h3>User Comments (${(p.comments||[]).length})</h3>

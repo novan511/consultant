@@ -14,7 +14,8 @@
       <span class="sub">50 minds · 12 LLMs · 24/7</span>
     </div>
     <div class="controls">
-      <input id="search" placeholder="Search professors, topics, journals…" />
+      <input id="search" placeholder="Search professors… (press /)" />
+      <span id="searchCount" class="hidden"></span>
       <select id="filterUni">
         <option value="">All universities</option>
         <option>MIT</option><option>Harvard</option><option>Oxford</option>
@@ -26,6 +27,12 @@
 
   <!-- Full-screen board -->
   <section class="board" id="board">
+    <div class="board-loading" id="boardLoading">
+      <div style="text-align:center">
+        <div class="spinner"></div>
+        <div class="label">Loading 50 professors...</div>
+      </div>
+    </div>
     <svg class="connections" id="connections"></svg>
     <div class="grid-bg"></div>
     <!-- Category legend -->
@@ -57,9 +64,19 @@
   </div>
 
   <!-- Floating toggle buttons (draggable) -->
-  <button class="fab fab-sidebar" id="toggleSidebar" title="Open detail panel">📋</button>
-  <button class="fab fab-chat" id="toggleChat" title="Open chat">💬</button>
+  <button class="fab fab-sidebar" id="toggleSidebar" title="Open detail panel (D)">📋</button>
+  <button class="fab fab-chat" id="toggleChat" title="Open chat (C)">💬</button>
 
+  <!-- Zoom controls -->
+  <div class="zoom-controls">
+    <button id="zoomOut" title="Zoom out (-)">−</button>
+    <span class="zoom-level" id="zoomLevel">100%</span>
+    <button id="zoomIn" title="Zoom in (+)">+</button>
+    <button id="zoomReset" title="Reset zoom (0)">⟲</button>
+    <button id="toggleLines" title="Toggle connection lines (L)" style="font-size:12px;">━</button>
+  </div>
+
+  <div id="offlineBar" class="offline-bar">Server offline — data may be stale</div>
   <div id="toast" class="toast hidden"></div>
 
   <script src="/supabase.js"></script>

@@ -2,13 +2,17 @@
 import { Professor } from './professor.js';
 import { getFeed, matchFeedToProfessor } from './feed.js';
 import { supabase } from './supabase.js';
-import { chat, MODEL_IDS } from './llm.js';
+import { chat as llmChat } from './lib/llm-manager.js';
+import { MODEL_IDS } from './llm.js';
+import {
+  TICK_INTERVAL_MS, TICK_OVERHEAD_MS, PARALLEL_TICKERS, MAX_TICK_DURATION_MS,
+  DEBATE_PROBABILITY, DEBATE_ROUNDS, LEARN_PROBABILITY,
+  DEFAULT_TEMPERATURE, DEFAULT_MAX_TOKENS, REFLECTION_TEMPERATURE,
+  DEBATE_TEMPERATURE, JUDGE_TEMPERATURE, ROUTING_TEMPERATURE
+} from './lib/constants.js';
 
-const AUTO_TICK_MS        = parseInt(process.env.AUTO_TICK_MS        || '120000', 10);
-const DEBATE_PROB         = parseFloat(process.env.DEBATE_PROBABILITY || '0.15');
-const LEARN_PROB          = parseFloat(process.env.LEARN_PROBABILITY  || '0.6');
-const PARALLEL_TICKERS    = parseInt(process.env.PARALLEL_TICKERS     || '4', 10);
-const EMBED_ROUTING       = (process.env.EMBED_ROUTING || 'true').toLowerCase() !== 'false';
+const DEBATE_PROB = DEBATE_PROBABILITY;
+const LEARN_PROB = LEARN_PROBABILITY;
 
 function withTimeout(promise, ms) {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
@@ -41,7 +45,9 @@ export class Senate {
   async boot() {
     // Load memories with timeout so 1 slow query doesn't block everything.
     const loadAll = [...this.professors.values()].map(p =>
-      withTimeout(p.loadMemory().catch(() => {}), 8000)
+      withTimeout(p.loadMemory().catch(e => {
+        console.warn(`[boot] Failed to load memory for ${p.id}: ${e.message}`);
+      }), 8000)
     );
     await Promise.allSettled(loadAll);
     console.log(`[senate] Loaded memories for ${this.professors.size} professors`);
@@ -50,8 +56,8 @@ export class Senate {
     supabase.from('logs').insert({
       level: 'info', category: 'system',
       message: `Senate booted with ${this.professors.size} professors`,
-      details: { tickMs: AUTO_TICK_MS, parallel: PARALLEL_TICKERS }
-    }).then(() => {}, () => {});
+      details: { tickMs: TICK_INTERVAL_MS, parallel: PARALLEL_TICKERS }
+    }).then(() => {}, (e) => console.warn(`[boot-log] ${e.message}`));
   }
 
   // Hybrid routing: keyword overlap + token-similarity. If still ambiguous,
@@ -75,15 +81,15 @@ export class Senate {
     let top = scored.filter(x => x.score > 0).slice(0, 3).map(x => x.r);
 
     // LLM-as-router fallback when nothing matched well.
-    if (top.length === 0 && EMBED_ROUTING) {
+    if (top.length === 0 && process.env.EMBED_ROUTING !== 'false') {
       try {
         const list = scored.slice(0, 12).map(x =>
           `${x.r.id} | ${x.r.name} (${x.r.university}) | ${x.r.expertise.join(',')}`
         ).join('\n');
-        const { content } = await chat(MODEL_IDS['gpt-oss-20b'], [
+        const { content } = await llmChat(MODEL_IDS['gpt-oss-20b'], [
           { role: 'system', content: 'You are a router. Pick the 1-3 best professor IDs for the user question. Return ONLY a JSON array of IDs, nothing else.' },
           { role: 'user', content: `Professors:\n${list}\n\nQuestion: ${prompt}\n\nReturn JSON array of IDs.` }
-        ], { temperature: 0.2, max_tokens: 200 });
+        ], { temperature: ROUTING_TEMPERATURE, max_tokens: 200, useCache: false });
         const m = content.match(/\[[\s\S]*?\]/);
         const ids = m ? JSON.parse(m[0]) : [];
         top = ids.map(id => this.roster.find(r => r.id === id)).filter(Boolean).slice(0, 3);
@@ -132,7 +138,7 @@ export class Senate {
       }
     } else {
       const prompt = `Pick a current open question in ${prof.record.expertise.join('/')} and produce a short essay (300-500 words) with a novel angle.`;
-      const { content } = await prof.ask(prompt, { temperature: 1.1, max_tokens: 1500 });
+      const { content } = await prof.ask(prompt, { temperature: REFLECTION_TEMPERATURE, max_tokens: 1500 });
       await prof.journal('thought', {
         title: `Reflection — ${new Date().toISOString().slice(0, 10)}`,
         content, topic: 'self-reflection'
@@ -165,7 +171,7 @@ export class Senate {
     this.activeDebates.set(debate.id, { topic, turns: [] });
 
     let prevStance = 'I am open. Give me your position.';
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < DEBATE_ROUNDS; i++) {
       const arg = await prof.argue(topic, prevStance, opponent.name);
       await prof.journal('debate', {
         title: `Debate R${i + 1}: ${topic.slice(0, 60)}`,
@@ -193,21 +199,121 @@ export class Senate {
       }).eq('id', debate.id);
 
       // Increment applied_count for any learning referenced (cheap heuristic: all of this prof's recent).
-      await supabase.rpc('bump_applied_count', { p_id: opProf.id }).then(() => {}, () => {});
+      await supabase.rpc('bump_applied_count', { p_id: opProf.id }).catch(e => {
+        console.warn(`[debate] bump_applied_count failed for ${opProf.id}: ${e.message}`);
+      });
 
       prevStance = reply;
     }
 
+    // Write final conclusion with scoring
     const { content: conclusion } = await prof.ask(
-      `Summarize the debate on: ${topic}\nIn one paragraph (120 words), state where the two of you converged and what remains unresolved.`,
+      `DEBATE CONCLUSION for: ${topic}
+You debated with ${opponent.name}. Here is the full transcript:
+${this.activeDebates.get(debate.id)?.turns?.map(t => `[${t.professor_id}]: ${t.argument}`).join('\n\n') || 'N/A'}
+
+Write a 120-word conclusion that:
+1. States where you and your opponent converged (consensus points).
+2. States what remains genuinely unresolved.
+3. Identifies the single strongest argument from each side.
+4. Suggests what evidence would resolve the disagreement.`,
       { temperature: 0.6, max_tokens: 600 }
     );
+
+    // JUDGE: Score the debate
+    const scores = await this.judgeDebate(debate.id, topic, prof, opProf);
+
     await supabase.from('debates').update({
-      status: 'concluded', conclusion, updated_at: new Date().toISOString()
+      status: 'concluded',
+      conclusion,
+      scores,
+      consensus_points: scores.consensus_points,
+      winner: scores.winner,
+      updated_at: new Date().toISOString()
     }).eq('id', debate.id);
     this.activeDebates.delete(debate.id);
 
     await prof.log('info', 'debate', `debate concluded`);
+  }
+
+  async judgeDebate(debateId, topic, profA, profB) {
+    // Pick a third professor as judge (different from debaters, different expertise)
+    const candidates = this.roster.filter(r =>
+      r.id !== profA.id && r.id !== profB.id &&
+      !profA.record.expertise.some(e => r.expertise.some(re => re.toLowerCase().includes(e.toLowerCase())))
+    );
+    const judge = candidates.length > 0
+      ? candidates[Math.floor(Math.random() * candidates.length)]
+      : this.roster.find(r => r.id !== profA.id && r.id !== profB.id) || this.roster[0];
+    const judgeProf = this.professors.get(judge.id);
+
+    const { data: debateData } = await supabase.from('debates').select('turns').eq('id', debateId).single();
+    const turns = debateData?.turns || [];
+
+    const turnsText = turns.map((t, i) => `Round ${Math.floor(i/2)+1} — ${t.professor_id === profA.id ? profA.record.name : profB.record.name}:
+${t.argument}`).join('\n\n');
+
+    const { content: judgeResponse } = await judgeProf.ask(
+      `You are ${judgeProf.record.name}, ${judgeProf.record.title} at ${judgeProf.record.university}.
+You are judging a debate between ${profA.record.name} (${profA.record.expertise[0]}) and ${profB.record.name} (${profB.record.expertise[0]}).
+
+Topic: ${topic}
+
+DEBATE TRANSCRIPT:
+${turnsText}
+
+Score this debate in this exact JSON format (no markdown):
+{
+  "winner": "${profA.id}" or "${profB.id}" or "tie",
+  "winner_name": "<name>",
+  "scores": {
+    "professor_a": {
+      "logic": <1-10>,
+      "evidence": <1-10>,
+      "persuasiveness": <1-10>,
+      "addressing_counterarguments": <1-10>,
+      "staying_in_domain": <1-10>,
+      "total": <average>
+    },
+    "professor_b": {
+      "logic": <1-10>,
+      "evidence": <1-10>,
+      "persuasiveness": <1-10>,
+      "addressing_counterarguments": <1-10>,
+      "staying_in_domain": <1-10>,
+      "total": <average>
+    }
+  },
+  "consensus_points": ["<point 1>", "<point 2>"],
+  "unresolved_points": ["<point 1>", "<point 2>"],
+  "strongest_argument_a": "<what was A's best moment>",
+  "strongest_argument_b": "<what was B's best moment>",
+  "judge_commentary": "<2-3 sentences on your judging rationale>"
+}`,
+      { temperature: JUDGE_TEMPERATURE, max_tokens: 800 }
+    );
+
+    let scores;
+    try {
+      const m = judgeResponse.match(/\{[\s\S]*\}/);
+      scores = m ? JSON.parse(m[0]) : { winner: 'tie', judge_commentary: judgeResponse };
+    } catch {
+      scores = { winner: 'tie', judge_commentary: judgeResponse.slice(0, 500) };
+    }
+
+    // Log the judge's scoring
+    await supabase.from('logs').insert({
+      level: 'info', category: 'debate_judge',
+      message: `Judge ${judgeProf.record.name} scored debate: winner=${scores.winner}`,
+      details: {
+        debate_id: debateId,
+        judge_id: judge.id,
+        scores: scores.scores,
+        consensus_points: scores.consensus_points
+      }
+    });
+
+    return scores;
   }
 
   // Bulk tick — used by /api/professors/tick-all. Bounded concurrency.
@@ -231,11 +337,11 @@ export class Senate {
     this.running = true;
     await supabase.from('logs').insert({
       level: 'info', category: 'system', message: '24/7 autonomous loop started',
-      details: { parallel: PARALLEL_TICKERS }
+      details: { parallel: PARALLEL_TICKERS, tick_interval_ms: TICK_INTERVAL_MS }
     });
 
     // Initial burst: tick all professors immediately on first cycle.
-    console.log('[senate] Initial burst — ticking all 50 professors…');
+    console.log('[senate] Initial burst — ticking all 50 professors...');
     const feed = await getFeed();
     const shuffled = [...this.roster].sort(() => Math.random() - 0.5);
     await pMap(shuffled, async (r) => {
@@ -245,9 +351,11 @@ export class Senate {
       await supabase.from('professors').update({ status: 'working' }).eq('id', r.id);
       try { await this.tickProfessor(prof, feed); } catch (e) { await prof.log('error', 'system', 'tick failed', { err: String(e) }); }
     }, PARALLEL_TICKERS);
-    console.log('[senate] Initial burst complete. Entering main loop…');
+    console.log('[senate] Initial burst complete. Entering main loop...');
 
+    // Main loop — NEVER overlaps. Waits for cycle to finish + interval before next.
     while (this.running) {
+      const cycleStart = Date.now();
       try {
         const feed = await getFeed();
         await supabase.from('logs').insert({
@@ -263,10 +371,15 @@ export class Senate {
           try { await this.tickProfessor(prof, feed); done++; }
           catch (e) { await prof.log('error', 'system', 'tick failed', { err: String(e) }); }
         }, PARALLEL_TICKERS);
+        const cycleDuration = Date.now() - cycleStart;
         await supabase.from('logs').insert({
-          level: 'info', category: 'system', message: 'cycle complete', details: { processed: done }
+          level: 'info', category: 'system', message: 'cycle complete',
+          details: { processed: done, duration_ms: cycleDuration }
         });
-        await new Promise(res => setTimeout(res, AUTO_TICK_MS));
+        // Wait for remaining interval (cycle time is subtracted)
+        const waitTime = Math.max(TICK_INTERVAL_MS - cycleDuration + TICK_OVERHEAD_MS, TICK_OVERHEAD_MS);
+        log('info', 'loop', `Cycle took ${Math.round(cycleDuration/1000)}s, next in ${Math.round(waitTime/1000)}s`);
+        await new Promise(res => setTimeout(res, waitTime));
       } catch (e) {
         try {
           await supabase.from('logs').insert({
